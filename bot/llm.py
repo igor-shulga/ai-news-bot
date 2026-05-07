@@ -95,6 +95,19 @@ Return ONLY a JSON object with these keys:
 """
 
 
+import time
+
+_cached_model: str | None = None
+
+
+def get_model_once() -> str:
+    """Fetch the best model once per process run and cache it."""
+    global _cached_model
+    if _cached_model is None:
+        _cached_model = get_best_model()
+    return _cached_model
+
+
 def summarize(article: Article) -> dict:
     """
     Score article relevance and generate bilingual analytical summary.
@@ -105,7 +118,7 @@ def summarize(article: Article) -> dict:
     Raises on API errors so the caller can decide how to handle failures.
     """
     api_key = os.environ["OPENROUTER_API_KEY"]
-    model = get_best_model()
+    model = get_model_once()
 
     content_text = (
         article.snippet[:800]
@@ -129,28 +142,43 @@ def summarize(article: Article) -> dict:
         "max_tokens": 400,
     }
 
-    resp = httpx.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/ai-news-bot",
-        },
-        json=payload,
-        timeout=30,
-    )
-    resp.raise_for_status()
+    # Retry up to 3 times to handle 429 rate limits and null content
+    for attempt in range(3):
+        if attempt > 0:
+            time.sleep(5 * attempt)
 
-    response_data = resp.json()
-    content = response_data["choices"][0]["message"]["content"]
-    result = json.loads(content)
-
-    if "score" not in result or "ua" not in result or "en" not in result:
-        raise ValueError(
-            f"LLM response missing required keys: {list(result.keys())}"
+        resp = httpx.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/ai-news-bot",
+            },
+            json=payload,
+            timeout=30,
         )
 
-    score = int(result["score"])
-    logger.info(
-        "Scored %d/10: %s [model=%s]", score, article.title[:60], model
-    )
-    return {"score": score, "ua": result["ua"], "en": result["en"]}
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", 10))
+            logger.warning("Rate limited, waiting %ds (attempt %d/3)", retry_after, attempt + 1)
+            time.sleep(retry_after)
+            continue
+
+        resp.raise_for_status()
+
+        response_data = resp.json()
+        content = response_data["choices"][0]["message"].get("content")
+
+        if content is None:
+            logger.warning("Null content from model (attempt %d/3), retrying...", attempt + 1)
+            continue
+
+        result = json.loads(content)
+
+        if "score" not in result or "ua" not in result or "en" not in result:
+            raise ValueError(f"LLM response missing required keys: {list(result.keys())}")
+
+        score = int(result["score"])
+        logger.info("Scored %d/10: %s [model=%s]", score, article.title[:60], model)
+        return {"score": score, "ua": result["ua"], "en": result["en"]}
+
+    raise ValueError(f"Failed to get valid response after 3 attempts for: {article.title[:60]}")

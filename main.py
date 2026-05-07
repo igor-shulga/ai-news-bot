@@ -80,9 +80,12 @@ async def main() -> None:
 
     RELEVANCE_THRESHOLD = 7
 
+    import time
     results: list[tuple[Article, dict]] = []
-    for article in batch:
+    for i, article in enumerate(batch):
         try:
+            if i > 0:
+                time.sleep(3)  # pause between LLM calls to avoid rate limits
             summary = summarize(article)
             seen.add(article.url)  # mark as seen regardless of score
             if summary["score"] <= RELEVANCE_THRESHOLD:
