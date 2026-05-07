@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Expected response: JSON with a "model" key, e.g. {"model": "google/gemma-3-27b-it:free"}
 # If the exact JSON endpoint is not available, we try the HTML page and fall back.
 FREE_LLM_URL = "https://shir-man.com/free-llm/"
-FALLBACK_MODEL = "google/gemma-3-27b-it:free"
+FALLBACK_MODEL = "inclusionai/ling-2.6-1t:free"
 
 
 def get_best_model() -> str:
