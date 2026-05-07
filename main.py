@@ -20,7 +20,7 @@ from bot.parsers import Article, fetch_all
 from bot.telegram_publisher import publish_all
 
 # Maximum number of articles to process per run (to stay within free LLM quotas)
-MAX_ARTICLES_PER_RUN = 10
+MAX_ARTICLES_PER_RUN = 5
 
 # Path to the deduplication state file (committed to repo by GitHub Actions)
 SEEN_FILE = Path(__file__).parent / "seen_urls.json"
