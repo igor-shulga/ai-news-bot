@@ -78,12 +78,21 @@ async def main() -> None:
             len(new_articles) - MAX_ARTICLES_PER_RUN,
         )
 
-    results: list[tuple[Article, dict[str, str]]] = []
+    RELEVANCE_THRESHOLD = 7
+
+    results: list[tuple[Article, dict]] = []
     for article in batch:
         try:
             summary = summarize(article)
+            seen.add(article.url)  # mark as seen regardless of score
+            if summary["score"] <= RELEVANCE_THRESHOLD:
+                logger.info(
+                    "Skipped (score %d/10): %s",
+                    summary["score"],
+                    article.title[:60],
+                )
+                continue
             results.append((article, summary))
-            seen.add(article.url)
         except Exception as exc:
             logger.error(
                 "Error summarizing '%s' (%s): %s — skipping",

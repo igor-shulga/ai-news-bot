@@ -71,12 +71,36 @@ def get_best_model() -> str:
         return FALLBACK_MODEL
 
 
-def summarize(article: Article) -> dict[str, str]:
-    """
-    Generate a bilingual summary for the given article.
+SYSTEM_PROMPT = """You are a personal AI news analyst for a Head of Product & Quality who is deeply interested in:
+- AI agents and multi-agent systems (AI factories, orchestration, autonomous workflows)
+- LLMs, foundation models, new model releases and capabilities
+- AI in product development and software engineering
+- New trends shaping the AI industry
 
-    Returns a dict with keys 'ua' (Ukrainian) and 'en' (English),
-    each containing a 2-3 sentence summary.
+Your job:
+1. Score the article's relevance (1-10) for this reader. Score > 7 means it's worth reading.
+   - Score 8-10: directly about AI agents, LLMs, AI dev tools, AI industry shifts
+   - Score 5-7: tangentially related (AI policy, funding, hardware)
+   - Score 1-4: not relevant (unrelated tech, politics, sports)
+
+2. If relevant (score > 7), write a short analytical summary:
+   - 2-3 sentences max
+   - Focus on: what happened + what it means for the AI industry / product teams
+   - Not just facts — give insight: "This signals...", "This changes...", "Teams should pay attention because..."
+
+Return ONLY a JSON object with these keys:
+- "score": integer 1-10
+- "ua": Ukrainian analytical summary (or empty string "" if score <= 7)
+- "en": English analytical summary (or empty string "" if score <= 7)
+"""
+
+
+def summarize(article: Article) -> dict:
+    """
+    Score article relevance and generate bilingual analytical summary.
+
+    Returns dict with keys: 'score' (int), 'ua' (str), 'en' (str).
+    If score <= 7, 'ua' and 'en' will be empty strings.
 
     Raises on API errors so the caller can decide how to handle failures.
     """
@@ -86,15 +110,10 @@ def summarize(article: Article) -> dict[str, str]:
     content_text = (
         article.snippet[:800]
         if article.snippet
-        else "No content available, summarize based on title only."
+        else "No content available, analyze based on title only."
     )
 
-    prompt = (
-        "You are an AI news summarizer. Summarize the following article "
-        "in 2-3 sentences.\n"
-        'Return a JSON object with two keys: "ua" (Ukrainian summary) '
-        'and "en" (English summary).\n'
-        "Only return the JSON, nothing else.\n\n"
+    user_prompt = (
         f"Title: {article.title}\n"
         f"Source: {article.source}\n"
         f"Content: {content_text}"
@@ -102,9 +121,12 @@ def summarize(article: Article) -> dict[str, str]:
 
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
         "response_format": {"type": "json_object"},
-        "max_tokens": 300,
+        "max_tokens": 400,
     }
 
     resp = httpx.post(
@@ -122,10 +144,13 @@ def summarize(article: Article) -> dict[str, str]:
     content = response_data["choices"][0]["message"]["content"]
     result = json.loads(content)
 
-    if "ua" not in result or "en" not in result:
+    if "score" not in result or "ua" not in result or "en" not in result:
         raise ValueError(
-            f"LLM response missing required keys 'ua'/'en': {list(result.keys())}"
+            f"LLM response missing required keys: {list(result.keys())}"
         )
 
-    logger.info("Summarized: %s [model=%s]", article.title[:60], model)
-    return result
+    score = int(result["score"])
+    logger.info(
+        "Scored %d/10: %s [model=%s]", score, article.title[:60], model
+    )
+    return {"score": score, "ua": result["ua"], "en": result["en"]}
