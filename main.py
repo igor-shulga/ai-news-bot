@@ -15,7 +15,7 @@ import logging
 import sys
 from pathlib import Path
 
-from bot.llm import summarize
+from bot.llm import summarize_batch
 from bot.parsers import Article, fetch_all
 from bot.telegram_publisher import publish_all
 
@@ -80,29 +80,15 @@ async def main() -> None:
 
     RELEVANCE_THRESHOLD = 7
 
-    import time
+    summaries = summarize_batch(batch)
+
     results: list[tuple[Article, dict]] = []
-    for i, article in enumerate(batch):
-        try:
-            if i > 0:
-                time.sleep(3)  # pause between LLM calls to avoid rate limits
-            summary = summarize(article)
-            seen.add(article.url)  # mark as seen regardless of score
-            if summary["score"] <= RELEVANCE_THRESHOLD:
-                logger.info(
-                    "Skipped (score %d/10): %s",
-                    summary["score"],
-                    article.title[:60],
-                )
-                continue
-            results.append((article, summary))
-        except Exception as exc:
-            logger.error(
-                "Error summarizing '%s' (%s): %s — skipping",
-                article.title[:60],
-                article.url,
-                exc,
-            )
+    for article, summary in zip(batch, summaries):
+        seen.add(article.url)  # mark as seen regardless of score
+        if summary["score"] <= RELEVANCE_THRESHOLD:
+            logger.info("Skipped (score %d/10): %s", summary["score"], article.title[:60])
+            continue
+        results.append((article, summary))
 
     if results:
         posted = await publish_all(results)

@@ -97,52 +97,17 @@ Return ONLY a JSON object with these keys:
 
 import time
 
-_cached_model: str | None = None
+BATCH_SYSTEM_PROMPT = SYSTEM_PROMPT + """
+You will receive a numbered list of articles. Return a JSON object with key "results" —
+an array where each element corresponds to the article at the same index:
+[{"score": 8, "ua": "...", "en": "..."}, ...]
+
+Return ONLY the JSON object, nothing else.
+"""
 
 
-def get_model_once() -> str:
-    """Fetch the best model once per process run and cache it."""
-    global _cached_model
-    if _cached_model is None:
-        _cached_model = get_best_model()
-    return _cached_model
-
-
-def summarize(article: Article) -> dict:
-    """
-    Score article relevance and generate bilingual analytical summary.
-
-    Returns dict with keys: 'score' (int), 'ua' (str), 'en' (str).
-    If score <= 7, 'ua' and 'en' will be empty strings.
-
-    Raises on API errors so the caller can decide how to handle failures.
-    """
-    api_key = os.environ["OPENROUTER_API_KEY"]
-    model = get_model_once()
-
-    content_text = (
-        article.snippet[:800]
-        if article.snippet
-        else "No content available, analyze based on title only."
-    )
-
-    user_prompt = (
-        f"Title: {article.title}\n"
-        f"Source: {article.source}\n"
-        f"Content: {content_text}"
-    )
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "max_tokens": 400,
-    }
-
-    # Retry up to 3 times to handle 429 rate limits and null content
+def _call_openrouter(payload: dict, api_key: str) -> str:
+    """Make one OpenRouter call with retry on 429 and null content."""
     for attempt in range(3):
         if attempt > 0:
             time.sleep(5 * attempt)
@@ -154,7 +119,7 @@ def summarize(article: Article) -> dict:
                 "HTTP-Referer": "https://github.com/ai-news-bot",
             },
             json=payload,
-            timeout=30,
+            timeout=60,
         )
 
         if resp.status_code == 429:
@@ -164,21 +129,93 @@ def summarize(article: Article) -> dict:
             continue
 
         resp.raise_for_status()
-
-        response_data = resp.json()
-        content = response_data["choices"][0]["message"].get("content")
+        content = resp.json()["choices"][0]["message"].get("content")
 
         if content is None:
             logger.warning("Null content from model (attempt %d/3), retrying...", attempt + 1)
             continue
 
-        result = json.loads(content)
+        return content
 
-        if "score" not in result or "ua" not in result or "en" not in result:
-            raise ValueError(f"LLM response missing required keys: {list(result.keys())}")
+    raise ValueError("Failed to get valid response after 3 attempts")
 
-        score = int(result["score"])
-        logger.info("Scored %d/10: %s [model=%s]", score, article.title[:60], model)
-        return {"score": score, "ua": result["ua"], "en": result["en"]}
 
-    raise ValueError(f"Failed to get valid response after 3 attempts for: {article.title[:60]}")
+def summarize_batch(articles: list[Article]) -> list[dict]:
+    """
+    Score and summarize a batch of articles in a single LLM call.
+
+    Returns a list of dicts with keys: 'score' (int), 'ua' (str), 'en' (str).
+    Falls back to per-article calls if batch parsing fails.
+    """
+    if not articles:
+        return []
+
+    api_key = os.environ["OPENROUTER_API_KEY"]
+    model = get_best_model()
+    logger.info("Using model: %s, batch size: %d", model, len(articles))
+
+    # Build numbered article list for the prompt
+    articles_text = "\n\n".join(
+        f"[{i}] Title: {a.title}\nSource: {a.source}\n"
+        f"Content: {a.snippet[:400] if a.snippet else 'No content.'}"
+        for i, a in enumerate(articles)
+    )
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": BATCH_SYSTEM_PROMPT},
+            {"role": "user", "content": articles_text},
+        ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 400 * len(articles),
+    }
+
+    try:
+        content = _call_openrouter(payload, api_key)
+        data = json.loads(content)
+        results_raw = data.get("results", [])
+
+        if len(results_raw) != len(articles):
+            raise ValueError(
+                f"Expected {len(articles)} results, got {len(results_raw)}"
+            )
+
+        results = []
+        for i, (article, r) in enumerate(zip(articles, results_raw)):
+            score = int(r.get("score", 0))
+            logger.info("Scored %d/10: %s", score, article.title[:60])
+            results.append({"score": score, "ua": r.get("ua", ""), "en": r.get("en", "")})
+        return results
+
+    except Exception as exc:
+        logger.warning("Batch failed (%s), falling back to per-article calls", exc)
+        return _summarize_one_by_one(articles, api_key, model)
+
+
+def _summarize_one_by_one(articles: list[Article], api_key: str, model: str) -> list[dict]:
+    """Fallback: summarize articles one by one."""
+    results = []
+    for i, article in enumerate(articles):
+        if i > 0:
+            time.sleep(3)
+        try:
+            content_text = article.snippet[:800] if article.snippet else "No content."
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Title: {article.title}\nSource: {article.source}\nContent: {content_text}"},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 400,
+            }
+            content = _call_openrouter(payload, api_key)
+            r = json.loads(content)
+            score = int(r.get("score", 0))
+            logger.info("Scored %d/10: %s", score, article.title[:60])
+            results.append({"score": score, "ua": r.get("ua", ""), "en": r.get("en", "")})
+        except Exception as exc:
+            logger.error("Failed to summarize '%s': %s", article.title[:60], exc)
+            results.append({"score": 0, "ua": "", "en": ""})
+    return results
