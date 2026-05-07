@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-CUTOFF_HOURS = 24
+CUTOFF_HOURS = 48
 
 RSS_SOURCES = {
     "VentureBeat AI": "https://feeds.feedburner.com/venturebeat/SZYF",
