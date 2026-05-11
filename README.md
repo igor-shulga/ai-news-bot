@@ -1,130 +1,138 @@
 # AI News Telegram Bot
 
-Daily AI news digest bot. Scrapes 5 sources, scores each article by relevance (1-10), generates bilingual summaries (Ukrainian + English) via a free LLM, and publishes to a Telegram channel. Runs on GitHub Actions — no server, no cost.
-
-## What it does
-
-Every day at **11:00 Kyiv time** (08:00 UTC), the bot:
-
-1. Scrapes 5 AI news sources
-2. Filters articles published in the last 48 hours
-3. Skips already-posted articles (deduplication via `seen_urls.json`)
-4. Scores each article 1-10 for relevance — only articles scoring **> 7** are published
-5. Generates a bilingual analytical summary (UA + EN) — not just facts, but "what this means for the industry"
-6. Posts to your Telegram channel
-
-## Sources
-
-| Source | Method |
-|--------|--------|
-| VentureBeat AI | RSS |
-| TechCrunch AI | RSS |
-| The Decoder | RSS |
-| anthropic.com/news | HTML scraping |
-| karpathy.ai | HTML scraping (best-effort) |
-
-## Message format
-
-```
-🇺🇦 Короткий аналітичний summary українською...
-
-🇬🇧 Short analytical summary in English...
-
-🔗 Article Title
-📰 Source Name
-```
+Бот щодня о 11:00 (Київ) публікує в Telegram канал добірку новин про штучний інтелект. Знаходить статті, оцінює їх важливість, пише короткий summary українською та англійською. Працює безкоштовно, сервер не потрібен.
 
 ---
 
-## Setup Instructions
+## Що потрібно перед початком
 
-### Step 1 — Create a Telegram Bot
-
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot`
-3. Enter a name (e.g. `AI News Daily`) and a username (e.g. `ai_news_daily_bot`)
-4. Save the token it gives you — looks like `123456789:ABCdef...`
-
-### Step 2 — Create a Telegram Channel
-
-1. In Telegram: tap the pencil icon → New Channel
-2. Choose **Public** channel, set a username (e.g. `@ai_news_daily_ua`)
-3. Open Channel Info → Administrators → Add Administrator
-4. Search for your bot username → Add with **"Post Messages"** permission
-
-> **Private channel?** You'll need a numeric channel ID (e.g. `-1001234567890`).
-> Forward any message from the channel to **@userinfobot** or **@RawDataBot** to get it.
-
-### Step 3 — Get an OpenRouter API Key
-
-1. Go to **openrouter.ai** and sign up (free, no credit card needed)
-2. Go to **Keys** → Create Key
-3. Save the key — starts with `sk-or-...`
-
-> The bot uses shir-man.com to pick the best free model each day automatically.
-
-### Step 4 — Fork this repo
-
-1. Go to `github.com/igor-shulga/ai-news-bot`
-2. Click **Fork** → Create fork
-3. You now have your own copy at `github.com/YOUR_USERNAME/ai-news-bot`
-
-### Step 5 — Add GitHub Secrets
-
-In your forked repo: **Settings → Secrets and variables → Actions → New repository secret**
-
-Add these 3 secrets:
-
-| Secret name | Value |
-|-------------|-------|
-| `OPENROUTER_API_KEY` | Your OpenRouter key (`sk-or-...`) |
-| `TELEGRAM_BOT_TOKEN` | Token from BotFather |
-| `TELEGRAM_CHANNEL_ID` | `@your_channel_username` or `-1001234567890` for private |
-
-### Step 6 — Run it
-
-**Automatic:** The bot runs every day at 08:00 UTC (11:00 Kyiv) automatically.
-
-**Manual trigger:**
-1. Go to your repo → **Actions** tab
-2. Click **Daily AI News Digest** in the left sidebar
-3. Click **Run workflow** → **Run workflow**
-
-Watch the logs — you'll see articles being scored and published.
+- Акаунт в **Telegram**
+- Акаунт на **GitHub** (безкоштовно, реєстрація за 2 хвилини на github.com)
+- Акаунт на **OpenRouter** (безкоштовно, реєстрація за 2 хвилини на openrouter.ai)
+- Комп'ютер з браузером — більше нічого
 
 ---
 
-## Local test run
+## Крок 1 — Створити Telegram бота
 
-```bash
-git clone https://github.com/YOUR_USERNAME/ai-news-bot
-cd ai-news-bot
-pip install -r requirements.txt
+Бот — це акаунт в Telegram від імені якого будуть публікуватись новини.
 
-export OPENROUTER_API_KEY=sk-or-...
-export TELEGRAM_BOT_TOKEN=123456:ABC...
-export TELEGRAM_CHANNEL_ID=@your_channel
+1. Відкрий Telegram (на телефоні або комп'ютері)
+2. В пошуку знайди **@BotFather** (офіційний бот від Telegram із синьою галочкою)
+3. Натисни **START**
+4. Напиши `/newbot` і натисни відправити
+5. BotFather запитає ім'я бота — напиши будь-яке, наприклад: `AI News Daily`
+6. Потім запитає username (це унікальна назва, закінчується на `bot`) — наприклад: `ai_news_daily_2024_bot`
+7. BotFather відповість і дасть **токен** — довгий рядок вигляду `123456789:ABCdef...`
 
-python main.py
-```
+> Збережи цей токен — він знадобиться в Кроці 4. Нікому не показуй його.
 
 ---
 
-## Architecture
+## Крок 2 — Створити Telegram канал
+
+Канал — це місце куди бот буде публікувати новини. Підписники отримують їх автоматично.
+
+1. В Telegram натисни іконку олівця (новий чат) → **Новий канал**
+2. Введи назву, наприклад: `AI News Daily`
+3. Обери тип **Публічний канал**
+4. Придумай username каналу, наприклад: `@ai_news_daily_ua` (має бути унікальним)
+5. Натисни **Створити**
+6. Тепер додай бота як адміністратора:
+   - Відкрий канал → натисни на назву зверху → **Адміністратори**
+   - **Додати адміністратора** → введи username свого бота (з Кроку 1)
+   - Переконайся що є галочка **"Публікація повідомлень"** → Зберегти
+
+> Username каналу (наприклад `@ai_news_daily_ua`) збережи — знадобиться в Кроці 4.
+
+---
+
+## Крок 3 — Отримати API ключ OpenRouter
+
+OpenRouter — безкоштовний сервіс який надає доступ до AI моделей. Бот використовує його щоб писати summary новин.
+
+1. Відкрий **openrouter.ai** у браузері
+2. Натисни **Sign Up** у правому верхньому куті
+3. Зареєструйся через Google або email (безкоштовно, карта не потрібна)
+4. Після входу натисни на свій акаунт (правий верхній кут) → **Keys**
+5. Натисни **Create Key**
+6. Назви ключ, наприклад: `telegram-bot`
+7. Скопіюй ключ — він виглядає як `sk-or-v1-...`
+
+> Збережи цей ключ — він знадобиться в Кроці 4. Після закриття сторінки ключ більше не буде видно повністю.
+
+---
+
+## Крок 4 — Скопіювати проект на свій GitHub
+
+GitHub — це платформа де зберігається код. Тобі потрібно зробити свою копію цього проекту.
+
+1. Відкрий **github.com** і увійди в акаунт
+2. Відкрий сторінку проекту: **github.com/igor-shulga/ai-news-bot**
+3. Натисни кнопку **Fork** у правому верхньому куті
+4. Натисни **Create fork**
+
+Тепер у тебе є своя копія проекту за адресою `github.com/ТВІЙ_USERNAME/ai-news-bot`
+
+---
+
+## Крок 5 — Додати секрети (ключі та токени)
+
+Секрети — це місце де GitHub безпечно зберігає твої паролі та ключі.
+
+1. Відкрий свою копію проекту: `github.com/ТВІЙ_USERNAME/ai-news-bot`
+2. Натисни вкладку **Settings** (шестерня, зверху)
+3. В лівому меню знайди **Secrets and variables** → натисни → **Actions**
+4. Натисни кнопку **New repository secret**
+
+Додай три секрети по черзі (для кожного: вводиш Name, вводиш Secret, натискаєш **Add secret**):
+
+| Name | Secret (що вводити) |
+|------|---------------------|
+| `OPENROUTER_API_KEY` | Ключ з Кроку 3 (`sk-or-v1-...`) |
+| `TELEGRAM_BOT_TOKEN` | Токен з Кроку 1 (`123456789:ABCdef...`) |
+| `TELEGRAM_CHANNEL_ID` | Username каналу з Кроку 2 (`@ai_news_daily_ua`) |
+
+---
+
+## Крок 6 — Запустити перший раз
+
+1. В своєму проекті на GitHub натисни вкладку **Actions** (зверху)
+2. Зліва побачиш **Daily AI News Digest** — натисни на нього
+3. Праворуч натисни **Run workflow** → **Run workflow**
+4. З'явиться зелене колесо що крутиться — бот працює (займає ~2 хвилини)
+5. Коли з'явиться зелена галочка ✅ — відкрий свій Telegram канал
+
+У каналі має з'явитись перша новина!
+
+> Після цього бот буде запускатись **автоматично щодня о 11:00 (Київ)** без жодних дій з твого боку.
+
+---
+
+## Якщо щось пішло не так
+
+**Новини не з'явились у каналі:**
+- Перевір що бот доданий як адміністратор каналу з правом публікації
+- Перевір що в `TELEGRAM_CHANNEL_ID` введено `@` перед назвою каналу
+
+**Помилка в Actions (червоний хрестик):**
+- Натисни на запуск з помилкою → **publish** → подивись текст помилки
+- Найчастіша причина: неправильно скопійований токен або ключ (зайвий пробіл)
+
+**Приватний канал (не публічний):**
+- Username типу `@назва` не підходить — потрібен числовий ID
+- Відкрий Telegram → знайди `@RawDataBot` → додай його як адміна каналу → він напише числовий ID каналу (виглядає як `-1001234567890`)
+- Видали `@RawDataBot` після цього
+
+---
+
+## Як виглядає повідомлення в каналі
 
 ```
-main.py                       ← orchestrator: fetch → deduplicate → summarize → publish
-bot/
-  parsers.py                  ← RSS + HTML scrapers for all 5 sources
-  llm.py                      ← OpenRouter client: batch scoring + bilingual summaries
-  telegram_publisher.py       ← posts to Telegram channel
-seen_urls.json                ← deduplication state (auto-committed by GitHub Actions)
-.github/workflows/daily.yml   ← cron schedule + manual trigger
+🇺🇦 Короткий опис новини українською мовою у 2-3 реченнях.
+
+🇬🇧 Short news summary in English in 2-3 sentences.
+
+🔗 Назва статті (посилання)
+📰 Джерело
 ```
-
-## Notes
-
-- Articles are processed in batches of 5 to stay within free LLM quotas
-- If batch scoring fails, falls back to per-article calls automatically
-- Anthropic/Karpathy HTML selectors may break if those sites redesign — check logs if 0 articles from those sources
-- `seen_urls.json` is committed back to the repo after each run to persist deduplication state
